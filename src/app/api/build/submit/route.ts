@@ -50,26 +50,29 @@ export async function POST(req: Request) {
 
     const applicationId = `BLD_${cleanRegNo}_${Date.now()}`;
 
-    // 1. Try to record into build_with_us_26 or build_applications table if exists
-    try {
-      await supabase.from('build_applications').insert({
-        application_id: applicationId,
-        full_name: fullName.trim(),
-        registration_number: cleanRegNo,
-        outlook_email: cleanOutlook,
-        personal_email: cleanEmail,
-        phone_number: phoneNumber.trim(),
-        role: role.trim(),
-        preference_1: projectPreference1,
-        preference_2: projectPreference2,
-        tech_stack: techStack.trim(),
-        github_link: githubLink.trim(),
-        why_project: projectReason.trim(),
-        created_at: new Date().toISOString()
-      });
-    } catch (e) {
-      // Table might not exist yet; gracefully handled below
-      console.warn('Direct table insert note:', e);
+    // 1. Record into build_applications table
+    const { error: insertError } = await supabase.from('build_applications').insert({
+      application_id: applicationId,
+      full_name: fullName.trim(),
+      registration_number: cleanRegNo,
+      outlook_email: cleanOutlook,
+      personal_email: cleanEmail,
+      phone_number: phoneNumber.trim(),
+      role: role.trim(),
+      preference_1: projectPreference1,
+      preference_2: projectPreference2,
+      tech_stack: techStack.trim(),
+      github_link: githubLink.trim(),
+      why_project: projectReason.trim(),
+      created_at: new Date().toISOString()
+    });
+
+    if (insertError) {
+      console.error('Supabase build_applications insert error:', insertError);
+      return NextResponse.json(
+        { error: 'Database submission failed: ' + insertError.message },
+        { status: 500 }
+      );
     }
 
     // 2. Update directory profile phone / outlook / name if missing
