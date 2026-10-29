@@ -16,7 +16,8 @@ import {
   ArrowRight,
   LogOut,
   ShieldCheck,
-  UserPlus
+  UserPlus,
+  FolderGit2
 } from 'lucide-react';
 
 export default function AdminDashboard() {
@@ -112,6 +113,15 @@ export default function AdminDashboard() {
   }
 
   const ADMIN_MODULES = [
+    {
+      title: 'Projects form',
+      desc: 'Review Build with Us project applications, project preferences, tech stacks, and GitHub profiles.',
+      href: '/admin/projects',
+      icon: FolderGit2,
+      gradient: 'from-cyan-500/20 to-sky-500/5',
+      border: 'border-cyan-500/30',
+      badge: 'Build with Us'
+    },
     {
       title: 'JWT Recruitment Admin',
       desc: 'Review core member applications, access portfolios, and manage candidate interview scheduling.',
