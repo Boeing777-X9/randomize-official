@@ -6,8 +6,27 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    const { searchParams } = new URL(req.url);
+    const emailParam = searchParams.get('email')?.toLowerCase().trim();
+
+    if (emailParam) {
+      const { data: existingApp, error } = await supabase
+        .from('build_applications')
+        .select('*')
+        .ilike('personal_email', emailParam)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+
+      return NextResponse.json({ existingApplication: existingApp || null });
+    }
+
     const { data, error } = await supabase
       .from('build_applications')
       .select('*')
@@ -43,6 +62,37 @@ export async function POST(req: Request) {
       projectReason
     } = body;
 
+    const cleanEmail = (userEmail || '').toLowerCase().trim();
+    if (!cleanEmail) {
+      return NextResponse.json(
+        { error: 'You must be signed in with your Google account to submit this form.' },
+        { status: 401 }
+      );
+    }
+
+    // 0. Prevent multiple submissions from the same Gmail account
+    const { data: existingSubmission, error: checkError } = await supabase
+      .from('build_applications')
+      .select('application_id, full_name, role, preference_1, preference_2')
+      .ilike('personal_email', cleanEmail)
+      .limit(1)
+      .maybeSingle();
+
+    if (checkError) {
+      console.error('Supabase duplicate check error:', checkError);
+    }
+
+    if (existingSubmission) {
+      return NextResponse.json(
+        {
+          error: 'You have already submitted an application using this Google account.',
+          alreadySubmitted: true,
+          existingApplication: existingSubmission
+        },
+        { status: 409 }
+      );
+    }
+
     // Validation
     if (!fullName?.trim() || !registrationNumber?.trim() || !outlookEmail?.trim() || !phoneNumber?.trim()) {
       return NextResponse.json({ error: 'Please provide all required personal details.' }, { status: 400 });
@@ -66,7 +116,6 @@ export async function POST(req: Request) {
 
     const cleanOutlook = outlookEmail.toLowerCase().trim();
     const cleanRegNo = registrationNumber.toUpperCase().trim();
-    const cleanEmail = (userEmail || '').toLowerCase().trim();
 
     const applicationId = `BLD_${cleanRegNo}_${Date.now()}`;
 

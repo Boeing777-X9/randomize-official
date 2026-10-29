@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { supabase } from '@/lib/supabase/client';
 import type { User } from '@supabase/supabase-js';
 import confetti from 'canvas-confetti';
@@ -17,10 +17,7 @@ import {
   Send,
   Trash2,
   AlertCircle,
-  FolderGit2,
-  UserCheck,
   RefreshCw,
-  Compass,
   Cpu
 } from 'lucide-react';
 
@@ -89,6 +86,7 @@ export default function BuildWithUsPage() {
     preference1: string;
     preference2: string;
     role: string;
+    isExisting?: boolean;
   } | null>(null);
 
   // ── 1. Listen to Supabase Auth State ─────────────────────────────
@@ -100,6 +98,7 @@ export default function BuildWithUsPage() {
       setUser(currentUser);
 
       if (!currentUser) {
+        setSuccessData(null);
         setLoading(false);
         setIsDraftLoaded(true);
         return;
@@ -107,6 +106,49 @@ export default function BuildWithUsPage() {
 
       try {
         const cleanEmail = currentUser.email?.toLowerCase().trim();
+
+        // 0. Check if this Gmail account has already submitted the Build with Us form
+        if (cleanEmail) {
+          let existingApp: any = null;
+
+          const { data: directExisting } = await supabase
+            .from('build_applications')
+            .select('application_id, full_name, role, preference_1, preference_2')
+            .ilike('personal_email', cleanEmail)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (directExisting) {
+            existingApp = directExisting;
+          } else {
+            try {
+              const checkRes = await fetch(`/api/build/submit?email=${encodeURIComponent(cleanEmail)}`);
+              if (checkRes.ok) {
+                const checkJson = await checkRes.json();
+                if (checkJson.existingApplication) {
+                  existingApp = checkJson.existingApplication;
+                }
+              }
+            } catch {
+              // Ignore fallback error
+            }
+          }
+
+          if (existingApp && isMounted) {
+            setSuccessData({
+              applicationId: existingApp.application_id || 'SUBMITTED',
+              fullName: existingApp.full_name || currentUser.user_metadata?.full_name || '',
+              preference1: existingApp.preference_1 || 'N/A',
+              preference2: existingApp.preference_2 || 'N/A',
+              role: existingApp.role || 'N/A',
+              isExisting: true
+            });
+            setLoading(false);
+            setIsDraftLoaded(true);
+            return;
+          }
+        }
 
         // 1. Fetch from randomize_directory (matching membership & jwt)
         const [dirRes, memberRes] = await Promise.all([
@@ -224,6 +266,7 @@ export default function BuildWithUsPage() {
     try {
       await supabase.auth.signOut();
       setUser(null);
+      setSuccessData(null);
       setFormData(initialFormData);
     } catch (err) {
       console.error('Logout error:', err);
@@ -312,6 +355,22 @@ export default function BuildWithUsPage() {
       });
 
       const result = await res.json();
+
+      if (res.status === 409 && result.alreadySubmitted && result.existingApplication) {
+        const existing = result.existingApplication;
+        localStorage.removeItem(DRAFT_STORAGE_KEY);
+        setSuccessData({
+          applicationId: existing.application_id || 'SUBMITTED',
+          fullName: existing.full_name || formData.fullName.trim(),
+          preference1: existing.preference_1 || formData.projectPreference1,
+          preference2: existing.preference_2 || formData.projectPreference2,
+          role: existing.role || formData.role,
+          isExisting: true
+        });
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
+
       if (!res.ok) {
         throw new Error(result.error || 'Submission failed. Please try again.');
       }
@@ -324,7 +383,8 @@ export default function BuildWithUsPage() {
         fullName: formData.fullName.trim(),
         preference1: formData.projectPreference1,
         preference2: formData.projectPreference2,
-        role: formData.role
+        role: formData.role,
+        isExisting: false
       });
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err: any) {
@@ -447,14 +507,21 @@ export default function BuildWithUsPage() {
                 </button>
               </div>
             ) : successData ? (
-              /* ── 2. Success State ── */
+              /* ── 2. Success / Already Submitted State ── */
               <div className="w-full py-10 flex flex-col items-center text-center animate-in fade-in">
                 <CheckCircle2 className="w-20 h-20 text-emerald-400 mb-6 drop-shadow-[0_0_20px_rgba(52,211,153,0.4)]" />
                 <h2 className="text-2xl sm:text-3xl font-black text-white mb-2">
-                  APPLICATION SUBMITTED!
+                  {successData.isExisting ? 'APPLICATION ALREADY SUBMITTED!' : 'APPLICATION SUBMITTED!'}
                 </h2>
                 <p className="text-gray-400 mb-8 text-sm sm:text-base max-w-lg leading-relaxed">
-                  Thanks, <span className="text-white font-semibold">{successData.fullName}</span>. Your project application has been received and saved.
+                  {successData.fullName ? (
+                    <>
+                      Thanks, <span className="text-white font-semibold">{successData.fullName}</span>.{' '}
+                    </>
+                  ) : null}
+                  {successData.isExisting
+                    ? 'You have already submitted a Build with Us project application with this Google account.'
+                    : 'Your project application has been received and saved.'}
                 </p>
 
                 <div className="w-full max-w-md bg-white/[0.03] border border-white/10 rounded-2xl p-6 text-left space-y-3.5 mb-8">
@@ -486,16 +553,6 @@ export default function BuildWithUsPage() {
             ) : (
               /* ── 3. Active Build with Us Form ── */
               <form onSubmit={handleSubmit} className="space-y-8 animate-in fade-in">
-                {/* Auto-filled status indicator }
-                {autoFilled && (
-                  <div className="p-3.5 rounded-2xl bg-cyan-500/10 border border-cyan-500/25 flex items-center justify-between text-xs text-cyan-300 font-mono">
-                    <div className="flex items-center gap-2">
-                      <UserCheck className="w-4 h-4 text-cyan-400 shrink-0" />
-                      <span> </span>
-                    </div>
-                  </div>
-                )}*/}
-
                 {/* Error Banner */}
                 {error && (
                   <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs sm:text-sm flex items-center gap-3">
@@ -570,10 +627,10 @@ export default function BuildWithUsPage() {
                 </div>
 
                 {/* ── Section B: Role & Project Preferences ── */}
-                 <div className="p-6 border border-purple-500/30 bg-purple-500/[0.03] rounded-2xl space-y-6">
+                <div className="p-6 border border-purple-500/30 bg-purple-500/[0.03] rounded-2xl space-y-6">
                   <div className="flex items-center gap-2 text-purple-400 text-xs font-black uppercase tracking-widest">
                     <Layers className="w-4 h-4" /> Role & Project Preferences
-                  </div> 
+                  </div>
 
                   {/* Role Dropdown */}
                   <div>
@@ -672,7 +729,7 @@ export default function BuildWithUsPage() {
                 {/* ── Section C: Technical Profile & Project Motivation ── */}
                 <div className="p-6 border border-white/[0.08] bg-white/[0.015] rounded-2xl space-y-6">
                   <div className="flex items-center gap-2 text-cyan-400 text-xs font-black uppercase tracking-widest">
-                    <Cpu className="w-4 h-4" /> Technical Profile 
+                    <Cpu className="w-4 h-4" /> Technical Profile
                   </div>
 
                   {/* Tech Stack */}
